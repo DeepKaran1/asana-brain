@@ -1,0 +1,5 @@
+node_modules/
+.env
+asana_brain.db
+asana_brain.db-shm
+asana_brain.db-wal
