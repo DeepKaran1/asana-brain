@@ -2,4 +2,6 @@ node_modules/
 .env
 asana_brain.db
 asana_brain.db-shm
-asana_brain.db-wal
+asana_brain.db-walnode_modules/
+.env
+.DS_Store
