@@ -9,14 +9,16 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 function detectTopic(question) {
   const q = question.toLowerCase();
 
+  const statusKeywords    = ["status update", "latest update", "latest status", "status", "update", "health", "how is the project", "how's the project"];
   const overdueKeywords   = ["overdue", "late", "past due", "missed", "behind"];
   const milestoneKeywords = ["milestone", "milestones"];
   const progressKeywords  = ["progress", "completion", "percent", "%", "how far", "how complete", "done so far", "complete"];
   const memberKeywords    = ["who", "team", "member", "assigned", "assignee", "owner", "people", "person", "working"];
-  const sectionKeywords   = ["section", "column", "board", "list", "stage", "status"];
+  const sectionKeywords   = ["section", "column", "board", "list", "stage"];
   const upcomingKeywords  = ["upcoming", "next", "due soon", "coming up", "scheduled", "what's left", "whats left", "remaining"];
   const taskKeywords      = ["task", "tasks", "open", "closed", "completed", "incomplete", "todo", "to do", "work"];
 
+  if (statusKeywords.some(k => q.includes(k)))    return "status";
   if (overdueKeywords.some(k => q.includes(k)))   return "overdue";
   if (milestoneKeywords.some(k => q.includes(k))) return "milestones";
   if (progressKeywords.some(k => q.includes(k)))  return "progress";
@@ -33,6 +35,13 @@ function detectTopic(question) {
  */
 function sliceData(topic, snapshot) {
   switch (topic) {
+    case "status":
+      return {
+        project_name:   snapshot.project.name,
+        current_status: snapshot.project.status,
+        status_updates: snapshot.status_updates?.slice(0, 3) || [],
+        summary:        snapshot.summary
+      };
     case "overdue":
       return {
         project_name:  snapshot.project.name,
@@ -117,7 +126,7 @@ async function askBrain(question, snapshot, format = "bullets") {
 
   const formatHint = format === "paragraphs"
     ? "Write your response as clear prose paragraphs. Do NOT use bullet points or dashes. Be thorough and detailed."
-    : "Use bullet points for all lists and multi-part answers. Each bullet on its own line. Be thorough and detailed.";
+    : "Use bullet points for all lists and multi-part answers. Use • (bullet character) for each item. Each bullet on its own line. Be thorough and detailed.";
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -127,6 +136,12 @@ async function askBrain(question, snapshot, format = "bullets") {
         role: "system",
         content: `You are a helpful Asana project assistant for a Slack team.
 Answer questions about the project using only the data provided.
+IMPORTANT — Use Slack formatting only, never markdown:
+- Bold: *text* (single asterisk, not double)
+- Italic: _text_ (underscore)
+- Bullet points: • (bullet character, not dash or asterisk)
+- Never use #, ##, ### for headings — use *bold* instead
+- Never use ** for bold
 ${formatHint}
 If the data doesn't contain the answer, say so honestly.
 Today's date is ${new Date().toISOString().slice(0, 10)}.`

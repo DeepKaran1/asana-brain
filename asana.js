@@ -59,7 +59,7 @@ async function getProject(gid) {
   const res = await axios.get(`${BASE}/projects/${gid}`, {
     headers,
     params: {
-      opt_fields: "name,notes,current_status_update.text,due_on,start_on,completed,members.name,owner.name,permalink_url"
+      opt_fields: "name,notes,current_status_update.text,current_status_update.html_text,current_status_update.status_type,current_status_update.created_at,current_status_update.created_by.name,due_on,start_on,completed,members.name,owner.name,permalink_url"
     }
   });
   return res.data.data;
@@ -108,13 +108,33 @@ async function getSections(gid) {
 }
 
 /**
+ * Fetch all status updates for a project (not just the latest).
+ */
+async function getStatusUpdates(gid) {
+  console.log(`[Asana] Fetching status updates (GID: ${gid})...`);
+  try {
+    const res = await axios.get(`${BASE}/projects/${gid}/project_statuses`, {
+      headers,
+      params: {
+        opt_fields: "title,text,color,created_at,created_by.name"
+      }
+    });
+    return res.data.data || [];
+  } catch (err) {
+    console.log(`[Asana] Could not fetch status updates: ${err.message}`);
+    return [];
+  }
+}
+
+/**
  * Build a full snapshot of an Asana project ready for caching.
  */
 async function getAsanaSnapshot(gid) {
-  const [project, tasks, sections] = await Promise.all([
+  const [project, tasks, sections, statusUpdates] = await Promise.all([
     getProject(gid),
     getTasks(gid),
-    getSections(gid)
+    getSections(gid),
+    getStatusUpdates(gid)
   ]);
 
   const today        = new Date().toISOString().slice(0, 10);
@@ -157,7 +177,12 @@ async function getAsanaSnapshot(gid) {
       start_on:      project.start_on,
       due_on:        project.due_on,
       permalink_url: project.permalink_url,
-      status:        project.current_status_update?.text || null,
+      status: project.current_status_update ? {
+        text:       project.current_status_update.text || null,
+        type:       project.current_status_update.status_type || null,
+        created_at: project.current_status_update.created_at || null,
+        author:     project.current_status_update.created_by?.name || null
+      } : null,
       owner:         project.owner?.name || null,
       members:       (project.members || []).map(m => m.name)
     },
@@ -167,6 +192,13 @@ async function getAsanaSnapshot(gid) {
       open_tasks:      openTasks,
       progress_pct:    progressPct
     },
+    status_updates:   statusUpdates.map(s => ({
+      title:      s.title || null,
+      text:       s.text || null,
+      color:      s.color || null,
+      created_at: s.created_at || null,
+      author:     s.created_by?.name || null
+    })),
     overdue_tasks:    overdueTasks,
     upcoming_tasks:   upcomingTasks,
     milestones:       milestones.map(t => ({

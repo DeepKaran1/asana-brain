@@ -82,9 +82,9 @@ async function postSettingsButtons(channel, thread_ts) {
 app.event("app_mention", async ({ event }) => {
   const channel   = event.channel;
   const text      = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
-  const thread_ts = event.thread_ts || event.ts;
+  const newThread = event.ts;
 
-  console.log(`[App] Mention | channel: ${channel} | thread: ${thread_ts} | text: "${text}"`);
+  console.log(`[App] Mention | channel: ${channel} | thread: ${newThread} | text: "${text}"`);
 
   try {
     const mapped = getChannelProject(channel);
@@ -92,13 +92,13 @@ app.event("app_mention", async ({ event }) => {
     // ── CASE 1: Not connected yet ──────────────────────────────────────────
     if (!mapped) {
       if (!text) {
-        pendingChannels[channel] = thread_ts;
-        await reply(channel, thread_ts,
+        pendingChannels[channel] = newThread;
+        await reply(channel, newThread,
           "👋 Hi! I'm Asana Brain.\n\nWhich Asana project should I connect this channel to?\n_Just reply with the project name — no need to mention me again._"
         );
         return;
       }
-      await connectChannel(channel, thread_ts, text);
+      await connectChannel(channel, newThread, text);
       return;
     }
 
@@ -107,8 +107,8 @@ app.event("app_mention", async ({ event }) => {
 
     if (lower === "switch project") {
       clearChannelProject(channel);
-      pendingChannels[channel] = thread_ts;
-      await reply(channel, thread_ts,
+      pendingChannels[channel] = newThread;
+      await reply(channel, newThread,
         `🔄 Disconnected from *${mapped}*.\n\nReply with the new Asana project name to reconnect.`
       );
       return;
@@ -116,7 +116,7 @@ app.event("app_mention", async ({ event }) => {
 
     if (lower === "status") {
       const mapping = getChannelMapping(channel);
-      await reply(channel, thread_ts,
+      await reply(channel, newThread,
         `📌 Connected to *${mapping.projectName}*\n` +
         `Format: *${mapping.format === "bullets" ? "Bullet Points" : "Paragraphs"}*\n\n` +
         `Type \`@Asana Brain settings\` to change format.\n` +
@@ -126,40 +126,34 @@ app.event("app_mention", async ({ event }) => {
     }
 
     if (lower === "settings") {
-      await postSettingsButtons(channel, thread_ts);
+      await postSettingsButtons(channel, newThread);
       return;
     }
 
     if (!text) {
-      await reply(channel, thread_ts,
-        `📌 Connected to *${mapped}*. Ask me anything!\n_Type \`@Asana Brain switch project\` to change projects._`
+      await reply(channel, newThread,
+        `📌 Connected to *${mapped}*. Ask me anything!`
       );
       return;
     }
 
     // ── CASE 3: Answer the question ────────────────────────────────────────
-    await answerQuestion(text, mapped, channel, thread_ts);
+    await answerQuestion(text, mapped, channel, newThread);
 
   } catch (error) {
     console.error("[App] Unhandled error:", error.message);
-    await reply(channel, thread_ts, `❌ Something went wrong: ${error.message}`);
+    await reply(channel, newThread, `❌ Something went wrong: ${error.message}`);
   }
 });
 
 // ─────────────────────────────────────────────
 // 2. Button action handlers
 // ─────────────────────────────────────────────
-/**
- * Check if a Slack user is a workspace admin.
- */
 async function isWorkspaceAdmin(userId) {
   const result = await app.client.users.info({ user: userId });
   return result.user?.is_admin === true || result.user?.is_owner === true;
 }
 
-/**
- * Update the settings message to show a permission denied notice.
- */
 async function denyFormatChange(body) {
   await app.client.chat.update({
     channel: body.channel.id,
@@ -170,11 +164,7 @@ async function denyFormatChange(body) {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*Response Format Settings*
-
-🚫 Only Slack workspace admins can change the response format.
-
-Ask your workspace admin to update this setting.`
+          text: `*Response Format Settings*\n\n🚫 Only Slack workspace admins can change the response format.\n\nAsk your workspace admin to update this setting.`
         }
       }
     ]
@@ -202,11 +192,7 @@ app.action("set_format_bullets", async ({ body, ack }) => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*Response Format Settings*
-
-✅ Saved: *Bullet Points*
-
-All answers in this channel will now use bullet points.`
+          text: `*Response Format Settings*\n\n✅ Saved: *Bullet Points*\n\nAll answers in this channel will now use bullet points.`
         }
       }
     ]
@@ -234,11 +220,7 @@ app.action("set_format_paragraphs", async ({ body, ack }) => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*Response Format Settings*
-
-✅ Saved: *Paragraphs*
-
-All answers in this channel will now use paragraph format.`
+          text: `*Response Format Settings*\n\n✅ Saved: *Paragraphs*\n\nAll answers in this channel will now use paragraph format.`
         }
       }
     ]
@@ -246,7 +228,7 @@ All answers in this channel will now use paragraph format.`
 });
 
 // ─────────────────────────────────────────────
-// 3. Plain message handler
+// 3. Plain message handler (thread replies only)
 // ─────────────────────────────────────────────
 app.event("message", async ({ event }) => {
   if (event.bot_id || event.subtype) return;
@@ -295,10 +277,10 @@ app.event("message", async ({ event }) => {
     return;
   }
 
-  // ── c) Channel is connected — answer the question ─────────────────────────
+  // ── c) Connected — only respond inside threads ────────────────────────────
   const projectName = getChannelProject(channel);
-  if (projectName) {
-    console.log(`[App] Reply | channel: ${channel} | thread: ${thread_ts} | text: "${text}"`);
+  if (projectName && thread_ts) {
+    console.log(`[App] Thread reply | channel: ${channel} | thread: ${thread_ts} | text: "${text}"`);
     await answerQuestion(text, projectName, channel, thread_ts);
     return;
   }
@@ -307,7 +289,6 @@ app.event("message", async ({ event }) => {
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
-
 async function connectChannel(channel, thread_ts, projectName) {
   await reply(channel, thread_ts, `🔍 Looking up *${projectName}* in Asana...`);
 
@@ -321,7 +302,7 @@ async function connectChannel(channel, thread_ts, projectName) {
     await reply(channel, thread_ts,
       `✅ This channel is now connected to *${realName}*!\n\n` +
       `Ask me anything — tasks, overdue items, milestones, progress, team, sections.\n` +
-      `_No need to mention me again — just ask away._\n` +
+      `_Type \`@Asana Brain hello\` anytime to start a new thread._\n` +
       `_Type \`@Asana Brain settings\` to change response format._\n` +
       `_Type \`@Asana Brain switch project\` to connect a different project._`
     );
